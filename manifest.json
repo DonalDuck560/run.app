@@ -1,0 +1,9 @@
+{
+  "name": "RunAI Coach",
+  "short_name": "RunAI",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0f0f10",
+  "theme_color": "#0f0f10",
+  "icons": []
+}
