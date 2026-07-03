@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>RunAI</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body {
+    margin:0;
+    font-family: -apple-system, BlinkMacSystemFont, Arial;
+    background:#0f0f10;
+    color:white;
+}
+
+/* APP WRAPPER */
+.app {
+    max-width: 500px;
+    margin: auto;
+    padding-bottom: 80px;
+}
+
+/* SCREENS */
+.screen { display:none; padding:15px; }
+.screen.active { display:block; }
+
+/* TOP BAR */
+.header {
+    font-size:18px;
+    font-weight:600;
+    padding:15px;
+    border-bottom:1px solid #222;
+}
+
+/* CARDS */
+.card {
+    background:#161618;
+    border:1px solid #222;
+    border-radius:14px;
+    padding:12px;
+    margin-bottom:12px;
+}
+
+/* INPUTS */
+input {
+    width:100%;
+    padding:10px;
+    margin-top:6px;
+    background:#0f0f10;
+    border:1px solid #333;
+    color:white;
+    border-radius:10px;
+}
+
+/* BUTTON */
+button {
+    width:100%;
+    padding:10px;
+    margin-top:10px;
+    background:white;
+    color:black;
+    border:none;
+    border-radius:10px;
+    font-weight:600;
+}
+
+/* STATS GRID */
+.grid {
+    display:grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap:10px;
+}
+
+.stat {
+    background:#161618;
+    padding:12px;
+    border-radius:12px;
+    border:1px solid #222;
+}
+
+.stat h2 { margin:0; font-size:18px; }
+.stat p { margin:4px 0 0; font-size:12px; color:#aaa; }
+
+/* BOTTOM NAV */
+.nav {
+    position:fixed;
+    bottom:0;
+    left:0;
+    right:0;
+    background:#0f0f10;
+    border-top:1px solid #222;
+    display:flex;
+}
+
+.nav button {
+    flex:1;
+    background:none;
+    color:#aaa;
+    border:none;
+    padding:12px;
+    font-size:12px;
+}
+
+.nav button.active {
+    color:white;
+}
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+<!-- INPUT SCREEN -->
+<div id="screen-input" class="screen active">
+    <div class="header">Run Input</div>
+
+    <div class="card">
+        <input type="date" id="date">
+        <input type="number" id="dist" placeholder="Distance (km)">
+        <input type="number" id="time" placeholder="Time (min)">
+        <input type="number" id="elev" placeholder="Elevation (m)">
+        <input type="text" id="pace" placeholder="Pace (min/km) optional">
+
+        <button onclick="addRun()">Save Run</button>
+    </div>
+</div>
+
+<!-- STATS SCREEN -->
+<div id="screen-stats" class="screen">
+    <div class="header">Statistics</div>
+
+    <div class="grid">
+        <div class="stat">
+            <h2 id="totalKm">0</h2>
+            <p>Total km</p>
+        </div>
+
+        <div class="stat">
+            <h2 id="avgPace">0</h2>
+            <p>Avg pace</p>
+        </div>
+
+        <div class="stat">
+            <h2 id="totalElev">0</h2>
+            <p>Elevation</p>
+        </div>
+
+        <div class="stat">
+            <h2 id="weekKm">0</h2>
+            <p>7 day km</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <canvas id="chart"></canvas>
+    </div>
+</div>
+
+<!-- AI SCREEN -->
+<div id="screen-ai" class="screen">
+    <div class="header">AI Coach</div>
+
+    <div class="card">
+        <input id="apiKey" type="password" placeholder="Gemini API Key">
+        <button onclick="runAI()">Analyze</button>
+    </div>
+
+    <div class="card" id="aiBox">No analysis yet.</div>
+</div>
+
+</div>
+
+<!-- NAV -->
+<div class="nav">
+    <button onclick="show('input')" class="active">Input</button>
+    <button onclick="show('stats')">Stats</button>
+    <button onclick="show('ai')">AI</button>
+</div>
+
+<script>
+
+let runs = JSON.parse(localStorage.getItem("runs_v4")) || [];
+let chart;
+
+document.getElementById("date").valueAsDate = new Date();
+
+/* NAVIGATION */
+function show(tab){
+    document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+    document.getElementById("screen-" + tab).classList.add("active");
+
+    document.querySelectorAll(".nav button").forEach(b=>b.classList.remove("active"));
+    event.target.classList.add("active");
+
+    if(tab === "stats") updateStats();
+}
+
+/* SAVE RUN */
+function addRun(){
+    const d = document.getElementById("date").value;
+    const dist = +document.getElementById("dist").value;
+    const time = +document.getElementById("time").value;
+    const elev = +document.getElementById("elev").value || 0;
+    const pace = document.getElementById("pace").value;
+
+    if(!d || !dist || !time) return;
+
+    if(!pace){
+        const calcPace = (time/dist).toFixed(2);
+        runs.push({d, dist, time, elev, pace: calcPace});
+    } else {
+        runs.push({d, dist, time, elev, pace});
+    }
+
+    runs.sort((a,b)=> new Date(a.d) - new Date(b.d));
+    localStorage.setItem("runs_v4", JSON.stringify(runs));
+
+    updateStats();
+}
+
+/* STATS */
+function updateStats(){
+
+    let totalKm = runs.reduce((a,b)=>a+b.dist,0);
+
+    let totalElev = runs.reduce((a,b)=>a+b.elev,0);
+
+    let avgPace = runs.length
+        ? (runs.reduce((a,b)=>a+parseFloat(b.pace),0)/runs.length).toFixed(2)
+        : 0;
+
+    let week = runs.filter(r=>{
+        return (Date.now() - new Date(r.d)) < 7*86400000;
+    }).reduce((a,b)=>a+b.dist,0);
+
+    document.getElementById("totalKm").innerText = totalKm.toFixed(1);
+    document.getElementById("avgPace").innerText = avgPace;
+    document.getElementById("totalElev").innerText = totalElev.toFixed(0);
+    document.getElementById("weekKm").innerText = week.toFixed(1);
+
+    drawChart();
+}
+
+/* CHART */
+function drawChart(){
+    const ctx = document.getElementById("chart");
+    if(chart) chart.destroy();
+
+    chart = new Chart(ctx,{
+        type:"line",
+        data:{
+            labels:runs.map(r=>r.d),
+            datasets:[{
+                label:"km",
+                data:runs.map(r=>r.dist),
+                borderColor:"white"
+            }]
+        }
+    });
+}
+
+/* AI */
+async function runAI(){
+    const key = document.getElementById("apiKey").value;
+    if(!key) return;
+
+    const data = {
+        km: runs.reduce((a,b)=>a+b.dist,0),
+        elev: runs.reduce((a,b)=>a+b.elev,0),
+        avgPace: runs.length ? (runs.reduce((a,b)=>a+parseFloat(b.pace),0)/runs.length).toFixed(2) : 0
+    };
+
+    const prompt = `
+You are a professional running coach.
+
+Data:
+- Total km: ${data.km}
+- Elevation: ${data.elev}
+- Avg pace: ${data.avgPace}
+
+Give:
+1. Analysis
+2. Risk
+3. Training plan
+`;
+
+    document.getElementById("aiBox").innerText = "Loading...";
+
+    const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key="+key,
+        {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+        }
+    );
+
+    const json = await res.json();
+    document.getElementById("aiBox").innerText =
+        json.candidates?.[0]?.content?.parts?.[0]?.text || "Error";
+}
+
+/* INIT */
+updateStats();
+
+</script>
+
+</body>
+</html>
